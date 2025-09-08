@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 from fastapi import FastAPI
 from app.api.routes.health import router as health_router
 from app.api.routes.quotes import router as quotes_router
-from app.api.routes.bookings import router as bookings_router
+from app.api.routes.bookings_user import router as bookings_router
 from app.api.routes.callbacks import router as callbacks_router
 
 app = FastAPI()
@@ -31,7 +31,7 @@ def test_quote_endpoint():
     assert len(data["extras"]) == 2
 
 # ---------- BOOKINGS ----------
-@patch("app.api.routes.bookings.get_conn")
+@patch("app.api.routes.bookings_user.get_conn")
 @patch("app.services.agenda_client.create_lock")
 @patch("app.api.routes.quotes.calculate_quote")
 def test_create_booking(mock_quote, mock_lock, mock_conn):
@@ -48,7 +48,7 @@ def test_create_booking(mock_quote, mock_lock, mock_conn):
     assert data["status"] == "CREATED"
     assert data["lock_id"] == "1-2-3"
 
-@patch("app.api.routes.bookings.get_conn")
+@patch("app.api.routes.bookings_user.get_conn")
 def test_get_booking_found(mock_conn):
     mock_cursor = MagicMock()
     mock_cursor.fetchone.return_value = [1, 2, 3, "CREATED", 50.0, 25.0, "note"]
@@ -58,7 +58,7 @@ def test_get_booking_found(mock_conn):
     assert response.status_code == 200
     assert response.json()["court_id"] == 2
 
-@patch("app.api.routes.bookings.get_conn")
+@patch("app.api.routes.bookings_user.get_conn")
 def test_get_booking_not_found(mock_conn):
     mock_cursor = MagicMock()
     mock_cursor.fetchone.return_value = None
@@ -68,7 +68,7 @@ def test_get_booking_not_found(mock_conn):
     assert response.status_code == 404
     assert response.json()["detail"] == "booking not found"
 
-@patch("app.api.routes.bookings.get_conn")
+@patch("app.api.routes.bookings_user.get_conn")
 def test_cancel_booking_success(mock_conn):
     mock_cursor = MagicMock()
     mock_cursor.fetchone.return_value = ["CREATED"]
@@ -78,7 +78,7 @@ def test_cancel_booking_success(mock_conn):
     assert response.status_code == 200
     assert response.json()["ok"]
 
-@patch("app.api.routes.bookings.get_conn")
+@patch("app.api.routes.bookings_user.get_conn")
 def test_cancel_booking_not_found(mock_conn):
     mock_cursor = MagicMock()
     mock_cursor.fetchone.return_value = None
@@ -87,7 +87,7 @@ def test_cancel_booking_not_found(mock_conn):
     response = client.delete("/bookings/999")
     assert response.status_code == 404
 
-@patch("app.api.routes.bookings.get_conn")
+@patch("app.api.routes.bookings_user.get_conn")
 def test_cancel_booking_confirmed(mock_conn):
     mock_cursor = MagicMock()
     mock_cursor.fetchone.return_value = ["CONFIRMED"]
@@ -97,7 +97,7 @@ def test_cancel_booking_confirmed(mock_conn):
     assert response.status_code == 400
     assert response.json()["detail"] == "cannot cancel confirmed booking"
 
-@patch("app.api.routes.bookings.get_conn")
+@patch("app.api.routes.bookings_user.get_conn")
 def test_list_bookings(mock_conn):
     mock_cursor = MagicMock()
     mock_cursor.fetchall.return_value = [(1, 2, 3, "CREATED", 50.0)]
@@ -107,7 +107,7 @@ def test_list_bookings(mock_conn):
     assert response.status_code == 200
     assert response.json()[0]["status"] == "CREATED"
 
-@patch("app.api.routes.bookings.get_conn")
+@patch("app.api.routes.bookings_user.get_conn")
 @patch("app.services.payment_client.checkout")
 def test_checkout_booking(mock_checkout, mock_conn):
     mock_cursor = MagicMock()
