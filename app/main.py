@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from app.api.routes import health, bookings_user, quotes, callbacks
+from dotenv import load_dotenv
+load_dotenv()
 
 
 app = FastAPI(title="Sports-Booking")
