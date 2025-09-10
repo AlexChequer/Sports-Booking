@@ -2,6 +2,9 @@ import os
 import psycopg2
 from fastapi import APIRouter
 from app.services import agenda_client
+from dotenv import load_dotenv
+
+load_dotenv()
 
 router = APIRouter()
 DATABASE_URL = os.getenv("DATABASE_URL")

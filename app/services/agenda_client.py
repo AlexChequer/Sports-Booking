@@ -1,5 +1,8 @@
 import os
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 AGENDA_URL = os.getenv("AGENDA_URL", "http://sports-agenda:8000")
