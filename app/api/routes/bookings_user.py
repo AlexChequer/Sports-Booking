@@ -3,6 +3,9 @@ import psycopg2
 from fastapi import APIRouter, HTTPException
 from app.services import agenda_client, payment_client
 from app.api.routes.quotes import calculate_quote
+from dotenv import load_dotenv
+
+load_dotenv()
 
 router = APIRouter()
 DATABASE_URL = os.getenv("DATABASE_URL")

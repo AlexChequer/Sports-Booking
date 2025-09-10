@@ -1,5 +1,8 @@
 import os
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 PAYMENT_URL = os.getenv("PAYMENT_URL", "http://sports-payment:8000")
