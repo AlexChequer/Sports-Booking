@@ -46,4 +46,8 @@ jobs:
           script: |
             docker stop sports-booking
             docker rm --force sports-booking
-            docker run -d -p 8083:5000 --name sports-booking cheqr/sports-booking-ci:${{ github.sha }} 
+            docker run -d \
+              --name sports-booking \
+              -p 8083:5000 \
+              -e DATABASE_URL='${{ secrets.DATABASE_URL }}' \
+              cheqr/sports-booking-ci:${{ github.sha }}
