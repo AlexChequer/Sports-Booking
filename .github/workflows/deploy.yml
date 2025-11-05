@@ -50,4 +50,5 @@ jobs:
               --name sports-booking \
               -p 8080:5000 \
               -e DATABASE_URL='${{ secrets.DATABASE_URL }}' \
+              --network=rede \
               cheqr/sports-booking-ci:${{ github.sha }}
