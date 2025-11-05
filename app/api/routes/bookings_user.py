@@ -16,40 +16,31 @@ def get_conn():
     return psycopg2.connect(DATABASE_URL, sslmode="require")
 
 
-# =========================
-# Models (request bodies)
-# =========================
+# ======= MODELS =======
 class BookingCreate(BaseModel):
     court_id: int
     slot_id: int
     extras: List[str] = []
-    notes: Optional[str] = None
+    # não tem mais notes; se o front mandar, será ignorado pelo parse manual abaixo
 
 class BookingCheckout(BaseModel):
     method: str
     coupon: Optional[str] = None
 
 
-# =========================
-# Endpoints
-# =========================
+# ======= ENDPOINTS =======
 @router.post("/bookings")
 async def create_booking(payload: BookingCreate):
     """
-    Cria booking recebendo JSON:
-    {
-      "court_id": 1,
-      "slot_id": 17,
-      "extras": ["ball","vest"],
-      "notes": "..."
-    }
+    JSON esperado:
+    { "court_id": 1, "slot_id": 17, "extras": ["ball","vest"] }
     """
     court_id = payload.court_id
     slot_id = payload.slot_id
-    extras = payload.extras or []
-    notes = payload.notes
 
-    # calcula orçamento (base + extras)
+    # tolera 'notes' vindo do front sem quebrar (ignorado)
+    extras = payload.extras or []
+
     estimate = calculate_quote(court_id, slot_id, extras)
     price_map = {e["type"]: float(e["price"]) for e in estimate.get("extras", [])}
 
@@ -57,18 +48,18 @@ async def create_booking(payload: BookingCreate):
     try:
         cur = conn.cursor()
 
-        # 1) cria booking primeiro (pra ter booking_id real)
+        # 1) cria booking (sem coluna notes)
         cur.execute(
             """
-            INSERT INTO bookings (court_id, slot_id, status, estimate_total, notes)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO bookings (court_id, slot_id, status, estimate_total)
+            VALUES (%s, %s, %s, %s)
             RETURNING id
             """,
-            (court_id, slot_id, "CREATED", float(estimate["total"]), notes),
+            (court_id, slot_id, "CREATED", float(estimate["total"])),
         )
         booking_id = cur.fetchone()[0]
 
-        # 2) tenta lockar o slot no Agenda
+        # 2) lock no Agenda usando booking_id real
         try:
             lock = agenda_client.create_lock(
                 court_id=court_id, slot_id=slot_id, booking_id=booking_id
@@ -79,7 +70,7 @@ async def create_booking(payload: BookingCreate):
             conn.rollback()
             raise HTTPException(status_code=409, detail=f"slot not available: {e}")
 
-        # 3) insere extras (se houver), usando o preço correto por tipo
+        # 3) extras
         for e in extras:
             cur.execute(
                 """
@@ -100,10 +91,8 @@ async def create_booking(payload: BookingCreate):
         }
 
     except HTTPException:
-        # já tratamos e demos rollback acima
         raise
     except Exception as e:
-        # erro inesperado
         try:
             conn.rollback()
         except Exception:
@@ -122,7 +111,7 @@ async def get_booking(booking_id: int):
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, court_id, slot_id, status, estimate_total, paid_total, notes FROM bookings WHERE id=%s",
+            "SELECT id, court_id, slot_id, status, estimate_total, paid_total FROM bookings WHERE id=%s",
             (booking_id,),
         )
         row = cur.fetchone()
@@ -136,7 +125,6 @@ async def get_booking(booking_id: int):
             "status": row[3],
             "estimate_total": float(row[4]),
             "paid_total": float(row[5]) if row[5] else None,
-            "notes": row[6],
         }
     finally:
         conn.close()
@@ -164,8 +152,7 @@ async def cancel_booking(booking_id: int):
 @router.post("/bookings/{booking_id}/checkout")
 async def checkout_booking(booking_id: int, payload: BookingCheckout):
     """
-    Recebe JSON:
-    { "method": "CARD" | "PIX" | "BOLETO", "coupon": "ABC" }
+    JSON: { "method": "CARD" | "PIX" | "BOLETO", "coupon": "ABC" }
     """
     method = payload.method
     coupon = payload.coupon
