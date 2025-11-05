@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-PAYMENT_URL = os.getenv("PAYMENT_URL", "http://18.231.197.236:8080")
+PAYMENT_URL = os.getenv("PAYMENT_URL", "http://sports-payment:8082")
 
 
 def checkout(booking_id: int, amount: float, method: str, coupon: str | None = None):
