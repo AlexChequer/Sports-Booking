@@ -84,8 +84,7 @@ async def create_booking(payload: BookingCreate):
                 VALUES (%s, %s, %s, %s)
                 """,
                 (booking_id, e, 1, price_map.get(e, 0.0)),
-      
-
+            )
 
         conn.commit()
         cur.close()
