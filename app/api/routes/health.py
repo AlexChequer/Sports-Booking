@@ -1,7 +1,10 @@
-@router.get("/")
-async def root():
-    return {"status": "ok", "service": "Sports-Booking"}
+from fastapi import APIRouter, Depends
+from app.core.auth import verify_token
 
-@router.get("/health-public")
-async def health_public():
-    return {"status": "ok"}
+router = APIRouter()
+
+@router.get("/health")
+async def health(payload=Depends(verify_token)):
+    return {
+        "status": "ok",
+    }
