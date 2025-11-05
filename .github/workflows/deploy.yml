@@ -50,8 +50,12 @@ jobs:
             docker rm --force sports-booking || true
             docker run -d \
               --name sports-booking \
-              -p 8083:5000 \
+              -p 8080:5000 \
               -e DATABASE_URL='${{ secrets.DATABASE_URL }}' \
+
               -e AUTH0_DOMAIN=dev-epomg1ffnhcleclg.us.auth0.com \
               -e AUTH0_API_AUDIENCE=https://dev-epomg1ffnhcleclg.us.auth0.com/api/v2/ \
+
+              --network=rede \
+
               cheqr/sports-booking-ci:${{ github.sha }}
