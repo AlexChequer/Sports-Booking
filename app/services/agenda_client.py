@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-AGENDA_URL = os.getenv("AGENDA_URL", "http://sports-agenda:8000")
+AGENDA_URL = os.getenv("AGENDA_URL", "http://sports-agenda:8081")
 
 
 def create_lock(court_id: int, slot_id: int, booking_id: int, ttl_seconds: int = 300):
