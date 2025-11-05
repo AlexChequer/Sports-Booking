@@ -48,6 +48,6 @@ jobs:
             docker rm --force sports-booking
             docker run -d \
               --name sports-booking \
-              -p 8083:5000 \
+              -p 8080:5000 \
               -e DATABASE_URL='${{ secrets.DATABASE_URL }}' \
               cheqr/sports-booking-ci:${{ github.sha }}
