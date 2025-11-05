@@ -1,6 +1,8 @@
 import os
 import psycopg2
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from typing import List, Optional
 from app.services import agenda_client, payment_client
 from app.api.routes.quotes import calculate_quote
 from dotenv import load_dotenv
@@ -13,107 +15,178 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 def get_conn():
     return psycopg2.connect(DATABASE_URL, sslmode="require")
 
+
+# =========================
+# Models (request bodies)
+# =========================
+class BookingCreate(BaseModel):
+    court_id: int
+    slot_id: int
+    extras: List[str] = []
+    notes: Optional[str] = None
+
+class BookingCheckout(BaseModel):
+    method: str
+    coupon: Optional[str] = None
+
+
+# =========================
+# Endpoints
+# =========================
 @router.post("/bookings")
-async def create_booking(court_id: int, slot_id: int, extras: list[str] | None = None, notes: str | None = None):
-    estimate = calculate_quote(court_id, slot_id, extras or [])
-    lock = agenda_client.create_lock(court_id=court_id, slot_id=slot_id, booking_id=0)  # booking_id será o autoincremento
+async def create_booking(payload: BookingCreate):
+    """
+    Cria booking recebendo JSON:
+    {
+      "court_id": 1,
+      "slot_id": 17,
+      "extras": ["ball","vest"],
+      "notes": "..."
+    }
+    """
+    court_id = payload.court_id
+    slot_id = payload.slot_id
+    extras = payload.extras or []
+    notes = payload.notes
+
+    # calcula orçamento (base + extras)
+    estimate = calculate_quote(court_id, slot_id, extras)
+    price_map = {e["type"]: float(e["price"]) for e in estimate.get("extras", [])}
 
     conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT INTO bookings (court_id, slot_id, status, estimate_total, notes)
-        VALUES (%s, %s, %s, %s, %s)
-        RETURNING id
-        """,
-        (court_id, slot_id, "CREATED", estimate["total"], notes),
-    )
-    booking_id = cur.fetchone()[0]
+    try:
+        cur = conn.cursor()
 
-    # extras
-    if extras:
+        # 1) cria booking primeiro (pra ter booking_id real)
+        cur.execute(
+            """
+            INSERT INTO bookings (court_id, slot_id, status, estimate_total, notes)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (court_id, slot_id, "CREATED", float(estimate["total"]), notes),
+        )
+        booking_id = cur.fetchone()[0]
+
+        # 2) tenta lockar o slot no Agenda
+        try:
+            lock = agenda_client.create_lock(
+                court_id=court_id, slot_id=slot_id, booking_id=booking_id
+            )
+            if not lock or not lock.get("lock_id"):
+                raise RuntimeError("failed to lock slot")
+        except Exception as e:
+            conn.rollback()
+            raise HTTPException(status_code=409, detail=f"slot not available: {e}")
+
+        # 3) insere extras (se houver), usando o preço correto por tipo
         for e in extras:
             cur.execute(
-                "INSERT INTO booking_extras (booking_id, type, qty, price) VALUES (%s, %s, %s, %s)",
-                (booking_id, e, 1, float(estimate["extras"][0]["price"]) if estimate["extras"] else 0.0),
+                """
+                INSERT INTO booking_extras (booking_id, type, qty, price)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (booking_id, e, 1, price_map.get(e, 0.0)),
             )
 
-    conn.commit()
-    cur.close()
-    conn.close()
+        conn.commit()
+        cur.close()
 
-    return {"booking_id": booking_id, "status": "CREATED", "estimate": estimate, "lock_id": lock["lock_id"]}
+        return {
+            "booking_id": booking_id,
+            "status": "CREATED",
+            "estimate": estimate,
+            "lock_id": lock["lock_id"],
+        }
+
+    except HTTPException:
+        # já tratamos e demos rollback acima
+        raise
+    except Exception as e:
+        # erro inesperado
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
 
 @router.get("/bookings/{booking_id}")
 async def get_booking(booking_id: int):
     conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT id, court_id, slot_id, status, estimate_total, paid_total, notes FROM bookings WHERE id=%s", (booking_id,))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
-    if not row:
-        raise HTTPException(404, "booking not found")
-    return {
-        "id": row[0],
-        "court_id": row[1],
-        "slot_id": row[2],
-        "status": row[3],
-        "estimate_total": float(row[4]),
-        "paid_total": float(row[5]) if row[5] else None,
-        "notes": row[6],
-    }
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, court_id, slot_id, status, estimate_total, paid_total, notes FROM bookings WHERE id=%s",
+            (booking_id,),
+        )
+        row = cur.fetchone()
+        cur.close()
+        if not row:
+            raise HTTPException(404, "booking not found")
+        return {
+            "id": row[0],
+            "court_id": row[1],
+            "slot_id": row[2],
+            "status": row[3],
+            "estimate_total": float(row[4]),
+            "paid_total": float(row[5]) if row[5] else None,
+            "notes": row[6],
+        }
+    finally:
+        conn.close()
+
 
 @router.delete("/bookings/{booking_id}")
 async def cancel_booking(booking_id: int):
     conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT status FROM bookings WHERE id=%s", (booking_id,))
-    row = cur.fetchone()
-    if not row:
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT status FROM bookings WHERE id=%s", (booking_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "booking not found")
+        if row[0] == "CONFIRMED":
+            raise HTTPException(400, "cannot cancel confirmed booking")
+        cur.execute("UPDATE bookings SET status='CANCELLED' WHERE id=%s", (booking_id,))
+        conn.commit()
         cur.close()
+        return {"ok": True}
+    finally:
         conn.close()
-        raise HTTPException(404, "booking not found")
-    if row[0] == "CONFIRMED":
-        cur.close()
-        conn.close()
-        raise HTTPException(400, "cannot cancel confirmed booking")
-    cur.execute("UPDATE bookings SET status='CANCELLED' WHERE id=%s", (booking_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
-    return {"ok": True}
 
-@router.get("/me/bookings")
-async def list_bookings():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT id, court_id, slot_id, status, estimate_total FROM bookings ORDER BY id")
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    return [
-        {"id": r[0], "court_id": r[1], "slot_id": r[2], "status": r[3], "estimate_total": float(r[4])}
-        for r in rows
-    ]
 
 @router.post("/bookings/{booking_id}/checkout")
-async def checkout_booking(booking_id: int, method: str, coupon: str | None = None):
+async def checkout_booking(booking_id: int, payload: BookingCheckout):
+    """
+    Recebe JSON:
+    { "method": "CARD" | "PIX" | "BOLETO", "coupon": "ABC" }
+    """
+    method = payload.method
+    coupon = payload.coupon
+
     conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT estimate_total FROM bookings WHERE id=%s", (booking_id,))
-    row = cur.fetchone()
-    if not row:
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT estimate_total FROM bookings WHERE id=%s", (booking_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "booking not found")
+
+        amount = float(row[0])
+        pay = payment_client.checkout(
+            booking_id=booking_id, amount=amount, method=method, coupon=coupon
+        )
+
+        cur.execute("UPDATE bookings SET status='PENDING_PAYMENT' WHERE id=%s", (booking_id,))
+        conn.commit()
         cur.close()
+
+        return {"payment_id": pay.get("payment_id"), "status": pay.get("status")}
+    finally:
         conn.close()
-        raise HTTPException(404, "booking not found")
-
-    amount = float(row[0])
-    pay = payment_client.checkout(booking_id=booking_id, amount=amount, method=method, coupon=coupon)
-
-    cur.execute("UPDATE bookings SET status='PENDING_PAYMENT' WHERE id=%s", (booking_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    return {"payment_id": pay.get("payment_id"), "status": pay.get("status")}
