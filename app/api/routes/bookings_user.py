@@ -1,10 +1,14 @@
 import os
 import psycopg2
-from fastapi import APIRouter, HTTPException
+
+from fastapi import APIRouter, HTTPException, Depends
+
 from pydantic import BaseModel
 from typing import List, Optional
+
 from app.services import agenda_client, payment_client
 from app.api.routes.quotes import calculate_quote
+from app.core.auth import verify_token
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -30,6 +34,7 @@ class BookingCheckout(BaseModel):
 
 # ======= ENDPOINTS =======
 @router.post("/bookings")
+
 async def create_booking(payload: BookingCreate):
     """
     JSON esperado:
@@ -71,6 +76,7 @@ async def create_booking(payload: BookingCreate):
             raise HTTPException(status_code=409, detail=f"slot not available: {e}")
 
         # 3) extras
+
         for e in extras:
             cur.execute(
                 """
@@ -78,7 +84,8 @@ async def create_booking(payload: BookingCreate):
                 VALUES (%s, %s, %s, %s)
                 """,
                 (booking_id, e, 1, price_map.get(e, 0.0)),
-            )
+      
+
 
         conn.commit()
         cur.close()
@@ -105,8 +112,9 @@ async def create_booking(payload: BookingCreate):
             pass
 
 
+
 @router.get("/bookings/{booking_id}")
-async def get_booking(booking_id: int):
+async def get_booking(booking_id: int, payload=Depends(verify_token)):
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -131,7 +139,7 @@ async def get_booking(booking_id: int):
 
 
 @router.delete("/bookings/{booking_id}")
-async def cancel_booking(booking_id: int):
+async def cancel_booking(booking_id: int, payload=Depends(verify_token)):
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -147,6 +155,7 @@ async def cancel_booking(booking_id: int):
         return {"ok": True}
     finally:
         conn.close()
+
 
 
 @router.post("/bookings/{booking_id}/checkout")
@@ -177,3 +186,4 @@ async def checkout_booking(booking_id: int, payload: BookingCheckout):
         return {"payment_id": pay.get("payment_id"), "status": pay.get("status")}
     finally:
         conn.close()
+

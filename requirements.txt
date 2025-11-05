@@ -19,3 +19,9 @@ pytest
 pytest-cov
 psycopg2-binary
 requests
+python-jose
+python-dotenv
+requests
+fastapi
+uvicorn
+psycopg2-binary
